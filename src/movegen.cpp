@@ -142,7 +142,6 @@ namespace {
         if (Type == CAPTURES || Type == EVASIONS || Type == NON_EVASIONS)
         {
             Bitboard b1 = shift<UpRight>(pawnsNotOn7) & enemies;
-            Bitboard b2 = shift<UpLeft >(pawnsNotOn7) & enemies;
 
             assert(rank_of(pos.ep_square()) == relative_rank(Us, RANK_6));
 
