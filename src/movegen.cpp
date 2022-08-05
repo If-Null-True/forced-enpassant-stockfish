@@ -20,6 +20,7 @@
 
 #include "movegen.h"
 #include "position.h"
+#include "uci.h"
 
 namespace Stockfish {
 
@@ -58,82 +59,87 @@ namespace {
 
     Bitboard pawnsOn7    = pos.pieces(Us, PAWN) &  TRank7BB;
     Bitboard pawnsNotOn7 = pos.pieces(Us, PAWN) & ~TRank7BB;
-
-    // Single and double pawn pushes, no promotions
-    if (Type != CAPTURES)
-    {
-        Bitboard b1 = shift<Up>(pawnsNotOn7)   & emptySquares;
-        Bitboard b2 = shift<Up>(b1 & TRank3BB) & emptySquares;
-
-        if (Type == EVASIONS) // Consider only blocking squares
+    
+    if (pos.ep_square() == SQ_NONE || !Options["UCI_ForcedEnpassant"]) { // No enpassant or forced enpassant not enabled 
+        // Single and double pawn pushes, no promotions
+        if (Type != CAPTURES)
         {
-            b1 &= target;
-            b2 &= target;
+            Bitboard b1 = shift<Up>(pawnsNotOn7)   & emptySquares;
+            Bitboard b2 = shift<Up>(b1 & TRank3BB) & emptySquares;
+
+            if (Type == EVASIONS) // Consider only blocking squares
+            {
+                b1 &= target;
+                b2 &= target;
+            }
+
+            if (Type == QUIET_CHECKS)
+            {
+                // To make a quiet check, you either make a direct check by pushing a pawn
+                // or push a blocker pawn that is not on the same file as the enemy king.
+                // Discovered check promotion has been already generated amongst the captures.
+                Square ksq = pos.square<KING>(Them);
+                Bitboard dcCandidatePawns = pos.blockers_for_king(Them) & ~file_bb(ksq);
+                b1 &= pawn_attacks_bb(Them, ksq) | shift<   Up>(dcCandidatePawns);
+                b2 &= pawn_attacks_bb(Them, ksq) | shift<Up+Up>(dcCandidatePawns);
+            }
+
+            while (b1)
+            {
+                Square to = pop_lsb(b1);
+                *moveList++ = make_move(to - Up, to);
+            }
+
+            while (b2)
+            {
+                Square to = pop_lsb(b2);
+                *moveList++ = make_move(to - Up - Up, to);
+            }
         }
 
-        if (Type == QUIET_CHECKS)
+        // Promotions and underpromotions
+        if (pawnsOn7)
         {
-            // To make a quiet check, you either make a direct check by pushing a pawn
-            // or push a blocker pawn that is not on the same file as the enemy king.
-            // Discovered check promotion has been already generated amongst the captures.
-            Square ksq = pos.square<KING>(Them);
-            Bitboard dcCandidatePawns = pos.blockers_for_king(Them) & ~file_bb(ksq);
-            b1 &= pawn_attacks_bb(Them, ksq) | shift<   Up>(dcCandidatePawns);
-            b2 &= pawn_attacks_bb(Them, ksq) | shift<Up+Up>(dcCandidatePawns);
+            Bitboard b1 = shift<UpRight>(pawnsOn7) & enemies;
+            Bitboard b2 = shift<UpLeft >(pawnsOn7) & enemies;
+            Bitboard b3 = shift<Up     >(pawnsOn7) & emptySquares;
+
+            if (Type == EVASIONS)
+                b3 &= target;
+
+            while (b1)
+                moveList = make_promotions<Type, UpRight>(moveList, pop_lsb(b1));
+
+            while (b2)
+                moveList = make_promotions<Type, UpLeft >(moveList, pop_lsb(b2));
+
+            while (b3)
+                moveList = make_promotions<Type, Up     >(moveList, pop_lsb(b3));
         }
 
-        while (b1)
+        // Standard and en passant captures
+        if (Type == CAPTURES || Type == EVASIONS || Type == NON_EVASIONS)
         {
-            Square to = pop_lsb(b1);
-            *moveList++ = make_move(to - Up, to);
-        }
+            Bitboard b1 = shift<UpRight>(pawnsNotOn7) & enemies;
+            Bitboard b2 = shift<UpLeft >(pawnsNotOn7) & enemies;
 
-        while (b2)
-        {
-            Square to = pop_lsb(b2);
-            *moveList++ = make_move(to - Up - Up, to);
+            while (b1)
+            {
+                Square to = pop_lsb(b1);
+                *moveList++ = make_move(to - UpRight, to);
+            }
+
+            while (b2)
+            {
+                Square to = pop_lsb(b2);
+                *moveList++ = make_move(to - UpLeft, to);
+            }
         }
     }
 
-    // Promotions and underpromotions
-    if (pawnsOn7)
+    else // Forced enpassant
     {
-        Bitboard b1 = shift<UpRight>(pawnsOn7) & enemies;
-        Bitboard b2 = shift<UpLeft >(pawnsOn7) & enemies;
-        Bitboard b3 = shift<Up     >(pawnsOn7) & emptySquares;
-
-        if (Type == EVASIONS)
-            b3 &= target;
-
-        while (b1)
-            moveList = make_promotions<Type, UpRight>(moveList, pop_lsb(b1));
-
-        while (b2)
-            moveList = make_promotions<Type, UpLeft >(moveList, pop_lsb(b2));
-
-        while (b3)
-            moveList = make_promotions<Type, Up     >(moveList, pop_lsb(b3));
-    }
-
-    // Standard and en passant captures
-    if (Type == CAPTURES || Type == EVASIONS || Type == NON_EVASIONS)
-    {
-        Bitboard b1 = shift<UpRight>(pawnsNotOn7) & enemies;
-        Bitboard b2 = shift<UpLeft >(pawnsNotOn7) & enemies;
-
-        while (b1)
-        {
-            Square to = pop_lsb(b1);
-            *moveList++ = make_move(to - UpRight, to);
-        }
-
-        while (b2)
-        {
-            Square to = pop_lsb(b2);
-            *moveList++ = make_move(to - UpLeft, to);
-        }
-
-        if (pos.ep_square() != SQ_NONE)
+        if (Type == CAPTURES || Type == EVASIONS || Type == NON_EVASIONS)
         {
             assert(rank_of(pos.ep_square()) == relative_rank(Us, RANK_6));
 
@@ -196,10 +202,12 @@ namespace {
                                       : ~pos.pieces(   ); // QUIETS || QUIET_CHECKS
 
         moveList = generate_pawn_moves<Us, Type>(pos, moveList, target);
-        moveList = generate_moves<Us, KNIGHT, Checks>(pos, moveList, target);
-        moveList = generate_moves<Us, BISHOP, Checks>(pos, moveList, target);
-        moveList = generate_moves<Us,   ROOK, Checks>(pos, moveList, target);
-        moveList = generate_moves<Us,  QUEEN, Checks>(pos, moveList, target);
+        if (!Options["UCI_ForcedEnpassant"] || pos.ep_square() == SQ_NONE) {
+            moveList = generate_moves<Us, KNIGHT, Checks>(pos, moveList, target);
+            moveList = generate_moves<Us, BISHOP, Checks>(pos, moveList, target);
+            moveList = generate_moves<Us,   ROOK, Checks>(pos, moveList, target);
+            moveList = generate_moves<Us,  QUEEN, Checks>(pos, moveList, target);
+        }
     }
 
     if (!Checks || pos.blockers_for_king(~Us) & ksq)
